@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Link Shortener</title>
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:Arial;background:#f5f5f5;color:#333}
+        .center{display:flex;justify-content:center;align-items:center;min-height:100vh;padding:20px}
+        .card{background:#fff;border-radius:16px;padding:30px;width:100%;max-width:420px;box-shadow:0 4px 24px rgba(0,0,0,.1)}
+        h1{text-align:center;margin-bottom:5px}
+        .sub{text-align:center;color:#666;font-size:14px;margin-bottom:20px}
+        .tabs{display:flex;background:#f0f0f0;border-radius:8px;padding:4px;margin-bottom:20px}
+        .tab{flex:1;padding:10px;border:none;background:none;border-radius:6px;cursor:pointer;font-weight:500}
+        .tab.on{background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+        input{width:100%;padding:12px;border:1px solid #ddd;border-radius:8px;margin-bottom:12px;font-size:14px}
+        .btn{width:100%;padding:12px;border:none;border-radius:8px;font-size:14px;font-weight:500;cursor:pointer;background:#4f46e5;color:#fff}
+        .btn:hover{opacity:.9}
+        .btn-sm{padding:8px 16px;font-size:13px;width:auto}
+        .btn-red{background:#fee2e2;color:#dc2626}
+        .btn-out{background:rgba(255,255,255,.2);color:#fff}
+        .msg{padding:10px;text-align:center;border-radius:6px;margin-bottom:10px}
+        .msg-err{background:#fee2e2;color:#dc2626}
+        .msg-ok{background:#d1fae5;color:#059669}
+        .header{background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;padding:16px 20px}
+        .header-row{display:flex;justify-content:space-between;align-items:center;max-width:1100px;margin:0 auto}
+        .list{padding:20px;max-width:1100px;margin:0 auto}
+        .link-row{background:#fff;border-radius:12px;padding:15px;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,.1);display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px}
+        .link-row a{color:#4f46e5;text-decoration:none;font-weight:600}
+        .link-row span{color:#666;font-size:13px}
+        .modal{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.5);display:flex;justify-content:center;align-items:center;z-index:100}
+        .modal-box{background:#fff;border-radius:16px;padding:30px;width:90%;max-width:480px}
+        .modal-actions{display:flex;gap:10px;margin-top:20px}
+        .modal-actions button{flex:1}
+        .empty{text-align:center;padding:40px;color:#666}
+        .toast{position:fixed;top:20px;right:20px;padding:12px 20px;border-radius:8px;color:#fff;z-index:999}
+        .toast-ok{background:#10b981}
+        .toast-err{background:#ef4444}
+    </style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+var A='/api',cur=null,links=[],q='',page=1;
+
+function toast(m,t){var d=document.createElement('div');d.className='toast toast-'+(t||'ok');d.textContent=m;document.body.appendChild(d);setTimeout(function(){d.remove()},3000)}
+function token(){return localStorage.getItem('jwt')}
+function setT(t){localStorage.setItem('jwt',t)}
+function delT(){localStorage.removeItem('jwt')}
+function fd(d){if(!d)return'';var dt=new Date(d),n=new Date(),s=Math.floor((n-dt)/1000);if(s<60)return'только что';if(s<3600)return Math.floor(s/60)+' мин';if(s<86400)return Math.floor(s/3600)+' ч';return dt.toLocaleDateString('ru-RU')}
+
+function go(m,u,b){
+    var h={'Content-Type':'application/json'},t=token();
+    if(t)h['Authorization']='Bearer '+t;
+    return fetch(A+u,{method:m,headers:h,body:b?JSON.stringify(b):undefined}).then(function(r){
+        if(r.status===401){delT();auth();throw new Error('401')}
+        return r.text().then(function(text){
+            console.log('RAW response:', text);
+            var data;
+            try{data=JSON.parse(text)}catch(e){data=text}
+            if(!r.ok)throw new Error(data.error||data.message||'Ошибка '+r.status);
+            return data;
+        })
+    })
+}
+
+function auth(){
+    cur=null;
+    var h='<div class="center"><div class="card"><h1>🔗 Link Shortener</h1><p class="sub">Управление ссылками</p>';
+    h+='<div class="tabs"><button class="tab on" id="t1" onclick="sw(\'login\')">Вход</button><button class="tab" id="t2" onclick="sw(\'reg\')">Регистрация</button></div>';
+    h+='<div id="msg"></div>';
+    h+='<form id="f1"><input id="l1" placeholder="Имя пользователя"><input id="l2" type="password" placeholder="Пароль"><button class="btn">Войти</button></form>';
+    h+='<form id="f2" style="display:none"><input id="r1" placeholder="Имя пользователя"><input id="r2" type="password" placeholder="Пароль"><button class="btn">Регистрация</button></form>';
+    h+='</div></div>';
+    document.getElementById('app').innerHTML=h;
+    
+    document.getElementById('f1').addEventListener('submit',function(e){
+        e.preventDefault();
+        var u=document.getElementById('l1').value.trim(),p=document.getElementById('l2').value,m=document.getElementById('msg');
+        if(u.length<3){m.className='msg msg-err';m.textContent='Минимум 3 символа';return}
+        m.className='msg';m.textContent='Вход...';
+        fetch(A+'/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})})
+        .then(function(r){return r.json()})
+        .then(function(d){
+            console.log('Login response:', d);
+            if(d.token){setT(d.token);m.className='msg msg-ok';m.textContent='✅';setTimeout(dash,300)}
+            else{m.className='msg msg-err';m.textContent='❌ '+(d.error||'Ошибка')}
+        }).catch(function(e){m.className='msg msg-err';m.textContent='❌ '+e.message})
+    });
+    
+    document.getElementById('f2').addEventListener('submit',function(e){
+        e.preventDefault();
+        var u=document.getElementById('r1').value.trim(),p=document.getElementById('r2').value,m=document.getElementById('msg');
+        if(u.length<3){m.className='msg msg-err';m.textContent='Минимум 3 символа';return}
+        m.className='msg';m.textContent='Регистрация...';
+        fetch(A+'/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})})
+        .then(function(r){return r.json()})
+        .then(function(d){
+            if(d.token){setT(d.token);m.className='msg msg-ok';m.textContent='✅';setTimeout(dash,300)}
+            else{m.className='msg msg-ok';m.textContent='✅ Войдите.';sw('login')}
+        }).catch(function(e){m.className='msg msg-err';m.textContent='❌ '+e.message})
+    });
+}
+
+function sw(t){
+    document.getElementById('f1').style.display=t==='login'?'block':'none';
+    document.getElementById('f2').style.display=t==='reg'?'block':'none';
+    document.getElementById('t1').className='tab'+(t==='login'?' on':'');
+    document.getElementById('t2').className='tab'+(t==='reg'?' on':'');
+    var m=document.getElementById('msg');if(m){m.textContent='';m.className='msg'}
+}
+
+function dash(p){
+    p=p||1;page=p;cur=null;
+    document.getElementById('app').innerHTML='<div class="center"><p>Загрузка...</p></div>';
+    
+    go('GET','/links').then(function(data){
+        // Проверяем формат ответа
+        console.log('Links response:', data, typeof data);
+        
+        if (Array.isArray(data)) {
+            links = data;
+        } else if (data.links && Array.isArray(data.links)) {
+            links = data.links;
+        } else if (data.data && Array.isArray(data.data)) {
+            links = data.data;
+        } else {
+            links = [];
+            console.error('Unexpected format:', data);
+        }
+        
+        var f=links;
+        if(q){var qq=q.toLowerCase();f=links.filter(function(x){return x.original_url.toLowerCase().indexOf(qq)!==-1})}
+        var pp=10,tp=Math.ceil(f.length/pp)||1,st=(p-1)*pp,it=f.slice(st,st+pp);
+        
+        var h='<div class="header"><div class="header-row"><span style="font-size:20px">🔗 Мои ссылки</span>';
+        h+='<div><button onclick="modal()" class="btn btn-sm" style="background:#fff;color:#4f46e5">✚</button> ';
+        h+='<button onclick="out()" class="btn btn-sm btn-out">Выйти</button></div></div></div>';
+        h+='<div class="list"><input value="'+(q||'')+'" placeholder="🔍 Поиск..." oninput="qs(this.value)" style="margin-bottom:20px">';
+        
+        for(var i=0;i<it.length;i++){
+            var lk=it[i],su=location.origin+'/'+lk.short_code;
+            h+='<div class="link-row"><div><a href="'+su+'" target="_blank">/'+lk.short_code+'</a><br><span>'+(lk.original_url||'').substring(0,50)+'...</span><br><span>📊 '+(lk.clicks||0)+' | 📅 '+fd(lk.created_at)+'</span></div>';
+            h+='<div><button class="btn btn-sm" onclick="st(\''+lk.short_code+'\')">📈</button> ';
+            h+='<button class="btn btn-sm btn-red" onclick="del('+lk.id+')">🗑</button></div></div>';
+        }
+        
+        if(it.length===0)h+='<div class="empty"><h3>Нет ссылок</h3><p>Создайте новую</p></div>';
+        if(tp>1){h+='<div style="text-align:center;margin-top:20px">';for(var j=1;j<=tp;j++)h+='<button class="btn btn-sm" style="margin:2px;'+(j===p?'background:#4f46e5;color:#fff':'background:#fff')+'" onclick="dash('+j+')">'+j+'</button>';h+='</div>'}
+        h+='</div>';
+        document.getElementById('app').innerHTML=h;
+    }).catch(function(e){
+        console.error('Dashboard error:', e);
+        if(e.message!=='401')document.getElementById('app').innerHTML='<div class="center"><div><p style="color:red">Ошибка: '+e.message+'</p><br><button class="btn btn-sm" onclick="dash()">Обновить</button></div></div>';
+    });
+}
+
+function qs(v){q=v;dash(1)}
+function out(){delT();links=[];q='';page=1;cur=null;auth()}
+
+function modal(){
+    var m=document.createElement('div');m.className='modal';m.onclick=function(e){if(e.target===m)m.remove()};
+    m.innerHTML='<div class="modal-box"><h2>Новая ссылка</h2><form id="cf"><input id="cu" placeholder="https://example.com"><input id="ca" placeholder="Код (необяз.)"><div class="modal-actions"><button type="button" class="btn" style="background:#f3f4f6;color:#333" onclick="this.closest(\'.modal\').remove()">Отмена</button><button class="btn" style="background:#4f46e5">Создать</button></div></form></div>';
+    document.body.appendChild(m);
+    document.getElementById('cf').addEventListener('submit',function(e){
+        e.preventDefault();
+        var u=document.getElementById('cu').value.trim(),a=document.getElementById('ca').value.trim();
+        if(!u)return;if(u.indexOf('http')!==0)u='https://'+u;
+        var b={url:u};if(a)b.alias=a;
+        go('POST','/links',b).then(function(){toast('Создано!');m.remove();dash(page)}).catch(function(e){if(e.message!=='401')toast(e.message,'err')})
+    })
+}
+
+function del(id){if(!confirm('Удалить?'))return;go('DELETE','/links/'+id).then(function(){toast('Удалено');dash(page)})}
+function st(c){cur=c;stat()}
+
+function stat(){
+    document.getElementById('app').innerHTML='<div class="center"><p>Загрузка...</p></div>';
+    go('GET','/links/'+cur+'/stats').then(function(s){
+        console.log('Stats response:', s);
+        var h='<div class="header"><div class="header-row"><button class="btn btn-sm btn-out" onclick="back()">← Назад</button><span>Статистика</span></div></div>';
+        h+='<div class="list"><div style="background:#fff;padding:20px;border-radius:12px;margin-bottom:20px"><h2>/'+cur+'</h2><p style="font-size:32px;font-weight:700">'+(s.total_clicks||s.clicks||0)+' <span style="font-size:14px;color:#666">кликов</span></p></div>';
+        h+='<div style="background:#fff;padding:20px;border-radius:12px"><h2>Последние переходы</h2>';
+        var clicks = s.recent_clicks || s.clicks || [];
+        if(clicks.length>0){
+            for(var i=0;i<clicks.length&&i<10;i++){var c=clicks[i];h+='<div style="padding:10px;background:#f9fafb;border-radius:8px;margin-bottom:8px"><strong>'+(c.ip||'?')+'</strong><br><small>'+fd(c.clicked_at)+'</small><br><small style="color:#666">'+(c.user_agent||'?')+'</small></div>'}
+        }else{h+='<p style="color:#666">Нет данных</p>'}
+        h+='</div></div>';
+        document.getElementById('app').innerHTML=h;
+    }).catch(function(e){console.error('Stats error:', e);document.getElementById('app').innerHTML='<div class="center"><p style="color:red">Ошибка</p><br><button class="btn btn-sm" onclick="back()">← Назад</button></div>'})
+}
+
+function back(){cur=null;dash(page)}
+
+// Старт
+if(token()){console.log('Has token, loading dashboard');dash()}else{console.log('No token, showing auth');auth()}
+</script>
+</body>
+</html>
